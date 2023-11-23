@@ -1,0 +1,17 @@
+name: ar6-wg3
+channels:
+  - chrisroadmap
+  - conda-forge
+dependencies:
+  - fair==2.1.2
+  - h5py
+  - matplotlib
+  - netCDF4
+  - numpy
+  - pandas
+  - pooch
+  - python-dotenv
+  - scikit-learn
+  - scipy
+  - tqdm
+  - xarray
