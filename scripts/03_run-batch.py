@@ -125,9 +125,9 @@ twenty = np.ones(21)
 twenty[0] = 0.5
 twenty[-1] = 0.5
 
-
-for batch_num, batch_start in tqdm(enumerate(range(0, len(vetted), batch_size)), total=int(np.ceil(len(vetted)/batch_size))):
-    batch_end = batch_start + batch_size
+batch_num = 0
+for batch_start in tqdm(range(batch_num * batch_size, len(vetted), batch_size), total=int(np.ceil(len(vetted)/batch_size))):
+    batch_end = min(batch_start + batch_size, len(vetted))
 
     scenarios = []
     for iscen in range(batch_start, batch_end):
@@ -418,3 +418,4 @@ for batch_num, batch_start in tqdm(enumerate(range(0, len(vetted), batch_size)),
     )
 
     ds.to_netcdf(os.path.join(datadir, "output", f"batch_{batch_num:0{4}d}.nc"))
+    batch_num = batch_num + 1
