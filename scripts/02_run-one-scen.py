@@ -21,11 +21,12 @@ from dotenv import load_dotenv
 from fair import FAIR
 from fair.interface import fill, initialise
 from fair.io import read_properties
+import matplotlib.pyplot as pl
 
 load_dotenv()
 datadir = os.getenv("DATADIR")
 
-scenarios = ['ssp119']
+scenarios = ['ssp119', 'ssp245', 'ssp585']
 
 df_solar = pd.read_csv(
     "../data/solar_erf_timebounds.csv", index_col="year"
@@ -36,6 +37,9 @@ df_volcanic = pd.read_csv(
 
 volcanic_forcing = df_volcanic["erf"].loc[2015:2101].values
 solar_forcing = df_solar["erf"].loc[2015:2101].values
+solar_forcing_decliner = np.zeros(87)
+solar_forcing_decliner[:11] = np.linspace(1, 0, 11)
+solar_forcing = solar_forcing * solar_forcing_decliner
 
 df_methane = pd.read_csv(
     "../calibrations/v1.3.0/CH4_lifetime.csv",
@@ -126,11 +130,28 @@ filt = ar6_wg3.loc[
     (ar6_wg3["Scenario"]=="SSP1-19")
 ]
 for fairname, rcmipname in fair_to_rcmip.items():
-    f.emissions.loc[dict(specie=fairname)] = filt.loc[
+    f.emissions.loc[dict(specie=fairname, scenario='ssp119')] = filt.loc[
         (filt["Variable"]==rcmipname),
         "2015":"2100"
-    ].values.squeeze()[:, None, None] * unit_convert[fairname]
-print(f.emissions)
+    ].values.squeeze()[:, None] * unit_convert[fairname]
+filt = ar6_wg3.loc[
+    (ar6_wg3["Model"]=="MESSAGE-GLOBIOM 1.0") &
+    (ar6_wg3["Scenario"]=="SSP2-45")
+]
+for fairname, rcmipname in fair_to_rcmip.items():
+    f.emissions.loc[dict(specie=fairname, scenario='ssp245')] = filt.loc[
+        (filt["Variable"]==rcmipname),
+        "2015":"2100"
+    ].values.squeeze()[:, None] * unit_convert[fairname]
+filt = ar6_wg3.loc[
+    (ar6_wg3["Model"]=="REMIND-MAgPIE 1.5") &
+    (ar6_wg3["Scenario"]=="SSP5-Baseline")
+]
+for fairname, rcmipname in fair_to_rcmip.items():
+    f.emissions.loc[dict(specie=fairname, scenario='ssp585')] = filt.loc[
+        (filt["Variable"]==rcmipname),
+        "2015":"2100"
+    ].values.squeeze()[:, None] * unit_convert[fairname]
 
 # add in missing emissions
 f.emissions.loc[dict(specie="Halon-1202")] = 0
@@ -342,32 +363,22 @@ fill(
 
 # load restarts and overwrite scenario name
 concentration_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "concentration_2015.nc"))
-concentration_2015.coords["scenario"] = scenarios
 forcing_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "forcing_2015.nc"))
-forcing_2015.coords["scenario"] = scenarios
 temperature_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "temperature_2015.nc"))
-temperature_2015.coords["scenario"] = scenarios
 airborne_emissions_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "airborne_emissions_2015.nc"))
-airborne_emissions_2015.coords["scenario"] = scenarios
 cumulative_emissions_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "cumulative_emissions_2015.nc"))
-cumulative_emissions_2015.coords["scenario"] = scenarios
 alpha_lifetime_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "alpha_lifetime_2015.nc"))
-alpha_lifetime_2015.coords["scenario"] = scenarios
 ocean_heat_content_change_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "ocean_heat_content_change_2015.nc"))
-ocean_heat_content_change_2015.coords["scenario"] = scenarios
 gas_partitions_2015 = xr.load_dataarray(os.path.join(datadir, "restarts", "gas_partitions_2015.nc"))
-gas_partitions_2015.coords["scenario"] = scenarios
 
 # These are the magic lines
-initialise(f.concentration, concentration_2015)
-initialise(f.forcing, forcing_2015)
-initialise(f.temperature, temperature_2015)
-initialise(f.airborne_emissions, airborne_emissions_2015)
-initialise(f.cumulative_emissions, cumulative_emissions_2015)
-initialise(f.ocean_heat_content_change, ocean_heat_content_change_2015)
-f.gas_partitions=copy.deepcopy(gas_partitions_2015)
-
-print(ocean_heat_content_change_2015)
+initialise(f.concentration, concentration_2015[0, ...])
+initialise(f.forcing, forcing_2015[0, ...])
+initialise(f.temperature, temperature_2015[0, ...])
+initialise(f.airborne_emissions, airborne_emissions_2015[0, ...])
+initialise(f.cumulative_emissions, cumulative_emissions_2015[0, ...])
+initialise(f.ocean_heat_content_change, ocean_heat_content_change_2015[0, ...])
+f.gas_partitions[:, ...]=copy.deepcopy(gas_partitions_2015[0:1, ...].data)
 
 f.run()
 
@@ -378,19 +389,72 @@ historical_temperature = xr.load_dataarray(os.path.join(datadir, "output", "hist
 historical_ocean_heat_content_change = xr.load_dataarray(os.path.join(datadir, "output", "historical_ocean_heat_content_change.nc"))
 historical_toa_imbalance = xr.load_dataarray(os.path.join(datadir, "output", "historical_toa_imbalance.nc"))
 
-import matplotlib.pyplot as pl
-pl.plot(np.arange(1750, 2016), historical_temperature.loc[dict(scenario="historical", config=valid_all[:10])])
-pl.plot(f.timebounds, f.temperature.loc[dict(scenario="ssp119", layer=0, config=valid_all[:10])])
+twenty = np.ones(21)
+twenty[0] = 0.5
+twenty[-1] = 0.5
+temperature_baseliner = np.average(historical_temperature.loc[dict(timebounds=np.arange(1995, 2016))], weights=twenty, axis=0)
+
+# pl.plot(np.arange(1750, 2016), 0.85 + historical_temperature.loc[dict(scenario="historical", config=valid_all)] - temperature_baseliner, color='k')
+# pl.plot(f.timebounds, 0.85 + f.temperature.loc[dict(scenario="ssp119", layer=0, config=valid_all)] - temperature_baseliner, color='b', alpha=0.01)
+# pl.plot(f.timebounds, 0.85 + f.temperature.loc[dict(scenario="ssp245", layer=0, config=valid_all)] - temperature_baseliner, color='orange', alpha=0.01)
+# pl.plot(f.timebounds, 0.85 + f.temperature.loc[dict(scenario="ssp585", layer=0, config=valid_all)] - temperature_baseliner, color='r', alpha=0.01)
+# pl.show()
+#
+# pl.plot(np.arange(1750, 2016), historical_concentration.loc[dict(specie="CO2", scenario="historical", config=valid_all)], color='k')
+# pl.plot(f.timebounds, f.concentration.loc[dict(scenario="ssp119", specie="CO2", config=valid_all)], color='b', alpha=0.01)
+# pl.plot(f.timebounds, f.concentration.loc[dict(scenario="ssp245", specie="CO2", config=valid_all)], color='orange', alpha=0.01)
+# pl.plot(f.timebounds, f.concentration.loc[dict(scenario="ssp585", specie="CO2", config=valid_all)], color='r', alpha=0.01)
+# pl.show()
+#
+# pl.plot(np.arange(1750, 2016), historical_ocean_heat_content_change.loc[dict(scenario="historical", config=valid_all)], color='k')
+# pl.plot(f.timebounds, f.ocean_heat_content_change.loc[dict(scenario="ssp119", config=valid_all)], color='b', alpha=0.01)
+# pl.plot(f.timebounds, f.ocean_heat_content_change.loc[dict(scenario="ssp585", config=valid_all)], color='r', alpha=0.01)
+# pl.show()
+#
+# pl.plot(np.arange(1750, 2016), historical_toa_imbalance.loc[dict(scenario="historical", config=valid_all)], color='k')
+# pl.plot(f.timebounds, f.toa_imbalance.loc[dict(scenario="ssp119", config=valid_all)], color='b')
+# pl.plot(f.timebounds, f.toa_imbalance.loc[dict(scenario="ssp585", config=valid_all)], color='r')
+# pl.show()
+
+# what outputs do I actually want: temperature, CO2 conc
+# forcing: CO2, CH4, N2O, aerosol, other
+temp = (f.temperature.loc[dict(layer=0)] - temperature_baseliner + 0.85).data
+cco2 = f.concentration.loc[dict(specie="CO2")].data
+fco2 = f.forcing.loc[dict(specie="CO2")].data
+fch4 = f.forcing.loc[dict(specie="CH4")].data
+fn2o = f.forcing.loc[dict(specie="N2O")].data
+faer = (f.forcing.loc[dict(specie="Aerosol-radiation interactions")] + f.forcing.loc[dict(specie="Aerosol-cloud interactions")]).data
+fsum = f.forcing_sum.data
+
+temp = 0.5*(temp[1:, ...] + temp[:-1, ...])
+cco2 = 0.5*(cco2[1:, ...] + cco2[:-1, ...])
+fco2 = 0.5*(fco2[1:, ...] + fco2[:-1, ...])
+fch4 = 0.5*(fch4[1:, ...] + fch4[:-1, ...])
+fn2o = 0.5*(fn2o[1:, ...] + fn2o[:-1, ...])
+faer = 0.5*(faer[1:, ...] + faer[:-1, ...])
+fsum = 0.5*(fsum[1:, ...] + fsum[:-1, ...])
+foth = fsum - fco2 - fch4 - fn2o - faer - fsum
+fnon = fsum - fco2
+
+pl.scatter(f.emissions.loc[dict(specie='CO2', scenario='ssp119')], fnon[:, 0, :])
+pl.scatter(f.emissions.loc[dict(specie='CO2', scenario='ssp245')], fnon[:, 1, :])
+pl.scatter(f.emissions.loc[dict(specie='CO2', scenario='ssp585')], fnon[:, 2, :])
 pl.show()
 
-pl.plot(np.arange(1750, 2016), historical_concentration.loc[dict(specie="CO2", scenario="historical", config=valid_all[:10])])
-pl.plot(f.timebounds, f.concentration.loc[dict(scenario="ssp119", specie="CO2", config=valid_all[:10])])
-pl.show()
+ds = xr.Dataset(
+    data_vars=dict(
+        temperature=(["timepoints", "scenario", "config"], temp),
+        concentration=(["timepoints", "scenario", "config"], cco2),
+        forcing = (["timepoints", "scenario", "config"], fsum),
+        forcing_co2 = (["timepoints", "scenario", "config"], fco2),
+        forcing_aerosol = (["timepoints", "scenario", "config"], faer),
+        forcing_nonco2ch4n2oaer = (["timepoints", "scenario", "config"], foth),
+    ),
+    coords=dict(
+        timepoints=np.arange(2015.5, 2101),
+        scenario=scenarios,
+        config=valid_all,
+    ),
+)
 
-pl.plot(np.arange(1750, 2016), historical_ocean_heat_content_change.loc[dict(scenario="historical", config=valid_all[:10])])
-pl.plot(f.timebounds, f.ocean_heat_content_change.loc[dict(scenario="ssp119", config=valid_all[:10])])
-pl.show()
-
-pl.plot(np.arange(1750, 2016), historical_toa_imbalance.loc[dict(scenario="historical", config=valid_all[:10])])
-pl.plot(f.timebounds, f.toa_imbalance.loc[dict(scenario="ssp119", config=valid_all[:10])])
-pl.show()
+ds.to_netcdf(os.path.join(datadir, "output", "batch_0001.nc"))
